@@ -1,13 +1,16 @@
 import os
 import pandas as pd
-from tkinter import Tk, ttk, Frame, Label, Button, Entry, messagebox, filedialog
+import tkinter as tk
+from tkinter import Tk, ttk, Frame, Label, Button, Entry, messagebox, filedialog, BooleanVar, Checkbutton
 from tkcalendar import DateEntry
 from database import Database
 from datetime import datetime
 import matplotlib.pyplot as plt 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.dates as mdates
 from math import sqrt, ceil
 import re
+import numpy as np
 
 
 class AppVentas:
@@ -51,6 +54,9 @@ class AppVentas:
         # Botón para abrir la ventana de selección de rango de fechas y generar el gráfico
         self.btn_grafico = Button(frame_controles, text="Generar Gráfico de Ventas", command=self.abrir_ventana_grafico)
         self.btn_grafico.pack(side="left", padx=10)
+
+        self.btn_comparar_meses = Button(frame_controles, text="Comparar Meses", command=self.generar_grafico_comparativo_meses)
+        self.btn_comparar_meses.pack()
 
         # Botón para cargar inventario y calcular pedidos
         self.btn_cargar_inventario = Button(frame_controles, text="Cargar Inventario y Calcular Pedidos", command=self.cargar_inventario_y_calcular_pedidos)
@@ -259,6 +265,211 @@ class AppVentas:
         btn_generar_grafico.pack(pady=10)
 
         ventana_rango_fechas.mainloop()
+
+    def generar_grafico_comparativo_meses(self):
+        # Crear ventana para selección de meses (usando Toplevel en lugar de Tk)
+        ventana_seleccion_meses = tk.Toplevel(self.root)
+        ventana_seleccion_meses.title("Selección de Meses para Comparación")
+        ventana_seleccion_meses.geometry("400x500")
+        
+        # Obtener el nombre del producto a analizar
+        producto = self.entry_producto.get()
+        
+        if not producto:
+            messagebox.showerror("Error", "Por favor, ingresa el nombre del producto.")
+            ventana_seleccion_meses.destroy()
+            return
+        
+        # Frame para los checkboxes de meses
+        frame_meses = tk.Frame(ventana_seleccion_meses)
+        frame_meses.pack(pady=10)
+        
+        # Obtener todos los meses disponibles para el producto
+        self.db.cursor.execute('''
+        SELECT DISTINCT strftime('%Y-%m', fecha_carga) as mes
+        FROM ventas
+        WHERE codigo = ?
+        ORDER BY mes
+        ''', (producto,))
+        meses_disponibles = [row[0] for row in self.db.cursor.fetchall()]
+        
+        if not meses_disponibles:
+            messagebox.showinfo("Información", f"No hay datos de ventas para el producto: {producto}.")
+            ventana_seleccion_meses.destroy()
+            return
+        
+        # Variables para los checkboxes (como atributo de la ventana)
+        ventana_seleccion_meses.vars_meses = {mes: tk.BooleanVar(value=False) for mes in meses_disponibles}
+
+        # Crear checkboxes para cada mes disponible
+        label = tk.Label(frame_meses, text="Selecciona los meses a comparar:")
+        label.pack(pady=5)
+
+        for mes in meses_disponibles:
+            cb = tk.Checkbutton(
+                frame_meses, 
+                text=mes,
+                variable=ventana_seleccion_meses.vars_meses[mes],
+                onvalue=True,
+                offvalue=False,
+                anchor='w'
+            )
+            cb.pack(fill='x', padx=5, pady=2)
+        
+        # Frame para el año de referencia
+        frame_anio = tk.Frame(ventana_seleccion_meses)
+        frame_anio.pack(pady=10)
+        tk.Label(frame_anio, text="Año de referencia (opcional):").pack()
+        entry_anio = tk.Entry(frame_anio)
+        entry_anio.pack()
+        
+        def generar_comparacion():
+            # Obtener meses seleccionados (CORRECCIÓN IMPORTANTE)
+            meses_seleccionados = [
+                mes for mes in meses_disponibles 
+                if ventana_seleccion_meses.vars_meses[mes].get()  # Acceso correcto a las variables
+            ]
+            
+            # print("Meses seleccionados:", meses_seleccionados)  # Debug
+            
+            if len(meses_seleccionados) < 2:
+                messagebox.showerror("Error", "Selecciona al menos 2 meses para comparar.")
+                return
+            
+            # Resto del código permanece igual...
+            # [Aquí iría el resto de tu función generar_comparacion()]
+            
+            # Obtener año de referencia si se especificó
+            anio_referencia = entry_anio.get().strip()
+            
+            # Consultar datos para cada mes seleccionado
+            datos_meses = {}
+            
+            for mes in meses_seleccionados:
+                # Construir rango de fechas (todo el mes)
+                fecha_inicio = f"{mes}-01"
+                
+                # Calcular fecha fin (versión simplificada)
+                if anio_referencia:
+                    mes_num = mes.split('-')[1]
+                    fecha_inicio = f"{anio_referencia}-{mes_num}-01"
+
+                def es_bisiesto(year):
+                    """Determina si un año es bisiesto"""
+                    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+                
+                year, month = map(int, fecha_inicio.split('-')[:2])
+                
+                # Determinar último día del mes
+                if month == 2:  # Febrero
+                    last_day = 29 if es_bisiesto(year) else 28
+                elif month in [4, 6, 9, 11]:  # Abril, Junio, Septiembre, Noviembre
+                    last_day = 30
+                else:  # Resto de meses
+                    last_day = 31
+                
+                fecha_fin = f"{year}-{month:02d}-{last_day:02d}"
+                
+                # Consultar datos
+                self.db.cursor.execute('''
+                SELECT fecha_carga, SUM(cantidad) as total_cantidad
+                FROM ventas
+                WHERE codigo = ? AND fecha_carga BETWEEN ? AND ?
+                GROUP BY fecha_carga
+                ORDER BY fecha_carga
+                ''', (producto, fecha_inicio, fecha_fin))
+                
+                ventas_mes = self.db.cursor.fetchall()
+                
+                if ventas_mes:
+                    # Normalizar fechas para que todas aparezcan como si fueran del mismo año
+                    fechas = []
+                    cantidades = []
+                    
+                    for venta in ventas_mes:
+                        fecha = venta[0]
+                        cantidad = venta[1]
+                        
+                        # Si hay año de referencia, cambiar el año en las fechas
+                        if anio_referencia:
+                            # Mantener mes y día original, cambiar año
+                            fecha_obj = datetime.datetime.strptime(fecha, "%Y-%m-%d")
+                            fecha_normalizada = fecha_obj.replace(year=int(anio_referencia)).strftime("%Y-%m-%d")
+                        else:
+                            # Usar fecha original
+                            fecha_normalizada = fecha
+                        
+                        fechas.append(fecha_normalizada)
+                        cantidades.append(cantidad)
+                    
+                    datos_meses[mes] = (fechas, cantidades)
+            
+            if not datos_meses:
+                messagebox.showinfo("Información", "No hay datos para los meses seleccionados.")
+                ventana_seleccion_meses.destroy()
+                return
+            
+            # Crear ventana para el gráfico comparativo (usando Toplevel)
+            ventana_grafico = tk.Toplevel(self.root)
+            ventana_grafico.title(f"Comparativo de Ventas - {producto}")
+            ventana_grafico.geometry("1000x700")
+            
+            # Crear figura de matplotlib
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Generar colores distintos para cada mes
+            colors = plt.cm.tab10(np.linspace(0, 1, len(datos_meses)))
+            
+            # Graficar cada mes
+            for (mes, color), (fechas, cantidades) in zip(zip(datos_meses.keys(), colors), datos_meses.values()):
+                # Convertir fechas a objetos datetime para el gráfico
+                fechas_dt = [datetime.strptime(f, "%Y-%m-%d") for f in fechas]
+                
+                # Graficar con etiqueta que incluye el mes original
+                ax.plot(fechas_dt, cantidades, marker='o', linestyle='-', color=color, label=mes)
+            
+            # Configurar el gráfico
+            titulo = f"Comparativo de Ventas - {producto}"
+            if anio_referencia:
+                titulo += f" (Año de referencia: {anio_referencia})"
+            
+            ax.set_title(titulo)
+            ax.set_xlabel("Día del Mes")
+            ax.set_ylabel("Cantidad Vendida")
+            ax.legend(title="Meses")
+            ax.grid(True)
+            
+            # Formatear el eje X para mostrar solo el día
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator())
+            
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            
+            # Integrar el gráfico en Tkinter
+            canvas = FigureCanvasTkAgg(fig, master=ventana_grafico)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            
+            # Botón para guardar el gráfico
+            def guardar_grafico():
+                filepath = filedialog.asksaveasfilename(
+                    defaultextension=".png",
+                    filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg"), ("PDF", "*.pdf"), ("Todos", "*.*")],
+                    title="Guardar gráfico como..."
+                )
+                if filepath:
+                    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+                    messagebox.showinfo("Éxito", f"Gráfico guardado en:\n{filepath}")
+            
+            btn_guardar = tk.Button(ventana_grafico, text="Guardar Gráfico", command=guardar_grafico)
+            btn_guardar.pack(pady=10)
+            
+            ventana_seleccion_meses.destroy()
+        
+        # Botón para generar la comparación
+        btn_generar = tk.Button(ventana_seleccion_meses, text="Generar Comparación", command=generar_comparacion)
+        btn_generar.pack(pady=20)
 
     def cargar_inventario_y_calcular_pedidos(self):
         try:
