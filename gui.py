@@ -17,7 +17,7 @@ class AppVentas:
     def __init__(self, root):
         self.root = root
         self.root.title("Gestión de Ventas")
-        self.root.geometry("1400x800")
+        self.root.geometry("1500x800")
         self.db = Database()
         self._crear_interfaz()
 
@@ -48,7 +48,7 @@ class AppVentas:
         # Campo para ingresar el nombre del producto
         self.label_producto = Label(frame_controles, text="Producto:")
         self.label_producto.pack(side="left", padx=10)
-        self.entry_producto = Entry(frame_controles, width=30)
+        self.entry_producto = Entry(frame_controles, width=20)
         self.entry_producto.pack(side="left", padx=10)
 
         # Botón para abrir la ventana de selección de rango de fechas y generar el gráfico
@@ -56,7 +56,7 @@ class AppVentas:
         self.btn_grafico.pack(side="left", padx=10)
 
         self.btn_comparar_meses = Button(frame_controles, text="Comparar Meses", command=self.generar_grafico_comparativo_meses)
-        self.btn_comparar_meses.pack()
+        self.btn_comparar_meses.pack(side="left", padx=10)
 
         # Botón para cargar inventario y calcular pedidos
         self.btn_cargar_inventario = Button(frame_controles, text="Cargar Inventario y Calcular Pedidos", command=self.cargar_inventario_y_calcular_pedidos)
@@ -270,7 +270,7 @@ class AppVentas:
         # Crear ventana para selección de meses (usando Toplevel en lugar de Tk)
         ventana_seleccion_meses = tk.Toplevel(self.root)
         ventana_seleccion_meses.title("Selección de Meses para Comparación")
-        ventana_seleccion_meses.geometry("400x500")
+        ventana_seleccion_meses.geometry("400x400")
         
         # Obtener el nombre del producto a analizar
         producto = self.entry_producto.get()
@@ -412,7 +412,7 @@ class AppVentas:
             # Crear ventana para el gráfico comparativo (usando Toplevel)
             ventana_grafico = tk.Toplevel(self.root)
             ventana_grafico.title(f"Comparativo de Ventas - {producto}")
-            ventana_grafico.geometry("1000x700")
+            ventana_grafico.geometry("1100x700")
             
             # Crear figura de matplotlib
             fig, ax = plt.subplots(figsize=(12, 6))
@@ -422,26 +422,26 @@ class AppVentas:
             
             # Graficar cada mes
             for (mes, color), (fechas, cantidades) in zip(zip(datos_meses.keys(), colors), datos_meses.values()):
-                # Convertir fechas a objetos datetime para el gráfico
-                fechas_dt = [datetime.strptime(f, "%Y-%m-%d") for f in fechas]
+                # Extraer días del mes (1-31)
+                dias = [int(f.split('-')[2]) for f in fechas]
                 
-                # Graficar con etiqueta que incluye el mes original
-                ax.plot(fechas_dt, cantidades, marker='o', linestyle='-', color=color, label=mes)
+                ax.plot(dias, cantidades, 'o-', color=color, label=mes, markersize=8)
             
             # Configurar el gráfico
             titulo = f"Comparativo de Ventas - {producto}"
             if anio_referencia:
                 titulo += f" (Año de referencia: {anio_referencia})"
             
-            ax.set_title(titulo)
+            ax.set_title(f"Comparativo Mensual de Ventas - {producto}")
             ax.set_xlabel("Día del Mes")
             ax.set_ylabel("Cantidad Vendida")
             ax.legend(title="Meses")
-            ax.grid(True)
+            ax.grid(True, alpha=0.3)
             
             # Formatear el eje X para mostrar solo el día
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d'))
-            ax.xaxis.set_major_locator(mdates.DayLocator())
+            ax.set_xlim(0.5, 31.5)  # Margen adicional
+            ax.set_xticks(range(1, 32))
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x)}'))
             
             plt.xticks(rotation=45)
             plt.tight_layout()
