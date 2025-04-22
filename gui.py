@@ -606,7 +606,8 @@ class AppVentas:
             wb = openpyxl.load_workbook(plantilla_path)
             
             # 4. Seleccionar hoja específica (ajusta el nombre)
-            hoja_pedidos = wb["Arequipa"]  # Nombre exacto de tu hoja
+            centroS = "Arequipa"
+            hoja_pedidos = wb[centroS]  # Nombre exacto de tu hoja
             
             # 5. Configuración de columnas (ajustar según tu plantilla)
             COL_PRODUCTO = 2   # Columna B
@@ -632,7 +633,7 @@ class AppVentas:
             if productos_procesados > 0:
                 archivo_salida = filedialog.asksaveasfilename(
                     defaultextension=".xlsx",
-                    initialfile=f"Orden_Pedido_{datetime.now().strftime('%Y-%m-%d')}",
+                    initialfile=f"Orden_Pedido_{centroS}{datetime.now().strftime('%Y-%m-%d')}",
                     filetypes=[("Excel files", "*.xlsx")]
                 )
                 
