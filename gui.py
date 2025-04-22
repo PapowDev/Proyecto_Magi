@@ -186,7 +186,7 @@ class AppVentas:
 
     def abrir_ventana_grafico(self):
         # Crear una nueva ventana para seleccionar el rango de fechas
-        ventana_rango_fechas = Tk()
+        ventana_rango_fechas = tk.Toplevel(self.root)
         ventana_rango_fechas.title("Seleccionar Rango de Fechas")
         ventana_rango_fechas.geometry("400x200")
 
@@ -492,7 +492,7 @@ class AppVentas:
                 return
 
             # Crear una ventana para mostrar las recomendaciones
-            ventana_recomendaciones = Tk()
+            ventana_recomendaciones = tk.Toplevel(self.root)
             ventana_recomendaciones.title("Recomendaciones de Pedidos")
             ventana_recomendaciones.geometry("1200x600")
 
@@ -564,7 +564,6 @@ class AppVentas:
                     cajas_a_pedir
                 ))
 
-            ventana_recomendaciones.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al cargar el inventario o calcular los pedidos: {e}")
 
