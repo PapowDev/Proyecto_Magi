@@ -13,7 +13,8 @@ class Database:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             codigo TEXT NOT NULL UNIQUE,
             nombre TEXT NOT NULL,
-            cantidad_por_caja INTEGER NOT NULL
+            cantidad_por_caja INTEGER NOT NULL,
+            prioridad TEXT DEFAULT 'baja'
         )
         ''')
 
