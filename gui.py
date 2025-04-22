@@ -1,4 +1,5 @@
 import os
+import openpyxl
 import pandas as pd
 import tkinter as tk
 from tkinter import Tk, ttk, Frame, Label, Button, Entry, messagebox, filedialog, BooleanVar, Checkbutton
@@ -504,9 +505,9 @@ class AppVentas:
             tabla_recomendaciones.pack(fill="both", expand=True)
 
             # Parámetros para el cálculo de pedidos
-            tiempo_entrega = 6.5  # Tiempo de entrega en días (ajustar según proveedor)
+            tiempo_entrega = 5  # Tiempo de entrega en días (ajustar según proveedor)
             costo_pedido = 30  # Costo fijo por hacer un pedido (ajustar según negocio)
-            costo_almacenamiento = 59  # Costo de almacenamiento por unidad (ajustar según negocio)
+            costo_almacenamiento = 69  # Costo de almacenamiento por unidad (ajustar según negocio)
 
             # Procesar cada producto en el inventario
             for index, row in df.iterrows():
@@ -564,8 +565,82 @@ class AppVentas:
                     cajas_a_pedir
                 ))
 
+            btn_frame = tk.Frame(ventana_recomendaciones)
+            btn_frame.pack(pady=10)
+
+            btn_exportar = tk.Button(
+                btn_frame,
+                text="Generar Orden desde Plantilla",
+                command=lambda: self.generar_orden_desde_plantilla(tabla_recomendaciones)
+            )
+            btn_exportar.pack(side=tk.LEFT, padx=5)
+
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al cargar el inventario o calcular los pedidos: {e}")
 
+    def generar_orden_desde_plantilla(self, tabla_recomendaciones):
+        try:
+            # 1. Obtener productos a pedir (cajas > 0)
+            pedidos = []
+            for item in tabla_recomendaciones.get_children():
+                valores = tabla_recomendaciones.item(item)['values']
+                if valores[5] > 0:  # Cajas a Pedir > 0
+                    pedidos.append({
+                        'producto': valores[0],  # Nombre
+                        'cajas': valores[5]      # Cantidad
+                    })
 
-    
+            if not pedidos:
+                messagebox.showinfo("Info", "No hay productos para pedir")
+                return
+
+            # 2. Seleccionar plantilla
+            plantilla_path = filedialog.askopenfilename(
+                title="Seleccionar plantilla de pedido",
+                filetypes=[("Excel files", "*.xlsx")]
+            )
+            if not plantilla_path:
+                return
+
+            # 3. Cargar plantilla
+            wb = openpyxl.load_workbook(plantilla_path)
+            
+            # 4. Seleccionar hoja específica (ajusta el nombre)
+            hoja_pedidos = wb["Arequipa"]  # Nombre exacto de tu hoja
+            
+            # 5. Configuración de columnas (ajustar según tu plantilla)
+            COL_PRODUCTO = 2   # Columna B
+            COL_CANTIDAD = 8   # Columna G
+            FILA_INICIO = 4    # Fila donde empiezan los productos
+
+            # 6. Rellenar datos
+            productos_procesados = 0
+            
+            for fila in hoja_pedidos.iter_rows(min_row=FILA_INICIO):
+                celda_producto = fila[COL_PRODUCTO - 1]
+                if celda_producto.value:
+                    # Buscar coincidencia (insensible a mayúsculas/espacios)
+                    producto_plantilla = str(celda_producto.value).strip().lower()
+                    
+                    for pedido in pedidos:
+                        if pedido['producto'].strip().lower() in producto_plantilla:
+                            fila[COL_CANTIDAD - 1].value = pedido['cajas']
+                            productos_procesados += 1
+                            break
+
+            # 7. Guardar
+            if productos_procesados > 0:
+                archivo_salida = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    initialfile=f"Orden_Pedido_{datetime.now().strftime('%Y-%m-%d')}",
+                    filetypes=[("Excel files", "*.xlsx")]
+                )
+                
+                if archivo_salida:
+                    wb.save(archivo_salida)
+                    messagebox.showinfo("Éxito", f"Orden generada con {productos_procesados} productos\nGuardada en:\n{archivo_salida}")
+            else:
+                messagebox.showwarning("Advertencia", "No se encontraron coincidencias con la plantilla")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al generar orden:\n{str(e)}")
