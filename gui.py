@@ -2,7 +2,7 @@ import os
 import openpyxl
 import pandas as pd
 import tkinter as tk
-from tkinter import Tk, ttk, Frame, Label, Button, Entry, messagebox, filedialog, BooleanVar, Checkbutton
+from tkinter import Tk, ttk, Frame, Label, Button, Entry, messagebox, filedialog, BooleanVar, Checkbutton, StringVar, Radiobutton
 from tkcalendar import DateEntry
 from database import Database
 from datetime import datetime
@@ -35,13 +35,13 @@ class AppVentas:
         self.cal_fecha.pack(side="left", padx=10)
 
         # Botón para cargar un archivo de Excel
-        self.btn_cargar = Button(frame_controles, text="Cargar Archivo Excel", command=self.procesar_archivo)
+        self.btn_cargar = Button(frame_controles, text="Cargar Archivo", command=self.procesar_archivo)
         self.btn_cargar.pack(side="left", padx=10)
 
         # Campo de búsqueda
         self.label_busqueda = Label(frame_controles, text="Buscar:")
         self.label_busqueda.pack(side="left", padx=10)
-        self.entry_busqueda = Entry(frame_controles, width=30)
+        self.entry_busqueda = Entry(frame_controles, width=15)
         self.entry_busqueda.pack(side="left", padx=10)
         self.btn_buscar = Button(frame_controles, text="Buscar", command=self.buscar_datos)
         self.btn_buscar.pack(side="left", padx=10)
@@ -49,7 +49,7 @@ class AppVentas:
         # Campo para ingresar el nombre del producto
         self.label_producto = Label(frame_controles, text="Producto:")
         self.label_producto.pack(side="left", padx=10)
-        self.entry_producto = Entry(frame_controles, width=20)
+        self.entry_producto = Entry(frame_controles, width=15)
         self.entry_producto.pack(side="left", padx=10)
 
         # Botón para abrir la ventana de selección de rango de fechas y generar el gráfico
@@ -79,9 +79,9 @@ class AppVentas:
         self.scrollbar.pack(side="right", fill="y")
         self.tabla.configure(yscrollcommand=self.scrollbar.set)
 
-        # Botón Analizar siguiente pedido
-        #self.btn_analizar_pedidos = Button(frame_controles, text="Analizar Pedidos", command=self.analizar_pedidos)
-        #self.btn_analizar_pedidos.pack(side="left", padx=10)
+        # Boton de cambio de prioridad
+        self.btn_prioridades = Button(frame_controles, text="Gestionar Prioridades", command=self.gestionar_prioridades,)
+        self.btn_prioridades.pack(side=tk.LEFT, padx=5)
 
         # Actualizar la tabla al iniciar
         self.actualizar_tabla()
@@ -486,97 +486,104 @@ class AppVentas:
             # Leer el archivo de Excel
             df = pd.read_excel(archivo)
 
-            # Verificar que las columnas requeridas estén presentes
+            # Verificar columnas requeridas
             columnas_requeridas = ['codigo', 'nombre', 'cantidad']
             if not all(col in df.columns for col in columnas_requeridas):
                 messagebox.showerror("Error", "El archivo de Excel no tiene las columnas requeridas.")
                 return
 
-            # Crear una ventana para mostrar las recomendaciones
+            # Crear ventana para recomendaciones
             ventana_recomendaciones = tk.Toplevel(self.root)
             ventana_recomendaciones.title("Recomendaciones de Pedidos")
             ventana_recomendaciones.geometry("1200x600")
 
-            # Crear una tabla para mostrar las recomendaciones
-            columnas = ("Producto", "Inventario Actual", "Demanda Promedio Diaria", "Punto de Reorden", "Cantidad a Pedir (EOQ)", "Cajas a Pedir")
+            # Crear tabla de recomendaciones
+            columnas = ("Producto", "Inventario Actual", "Demanda Promedio Diaria", 
+                    "Punto de Reorden", "Cantidad a Pedir (EOQ)", "Cajas a Pedir")
             tabla_recomendaciones = ttk.Treeview(ventana_recomendaciones, columns=columnas, show="headings")
             for col in columnas:
                 tabla_recomendaciones.heading(col, text=col)
             tabla_recomendaciones.pack(fill="both", expand=True)
 
-            # Parámetros para el cálculo de pedidos
-            tiempo_entrega = 5  # Tiempo de entrega en días (ajustar según proveedor)
-            costo_pedido = 30  # Costo fijo por hacer un pedido (ajustar según negocio)
-            costo_almacenamiento = 69  # Costo de almacenamiento por unidad (ajustar según negocio)
+            # Parámetros configurables
+            TIEMPO_ENTREGA = 5
+            COSTO_PEDIDO = 30
+            COSTO_ALMACENAMIENTO = 69
+            BUFFER_PRIORIDAD = {
+                'alta': 1.2,   # 20% sobre el punto de reorden
+                'media': 1.1,  # 10% sobre el punto de reorden
+                'baja': 1.0    # Sin buffer
+            }
 
-            # Procesar cada producto en el inventario
+            # Procesar cada producto
             for index, row in df.iterrows():
                 codigo = row['codigo']
                 nombre = row['nombre']
                 inventario_actual = row['cantidad']
 
-                # Obtener la cantidad de unidades por caja desde la tabla productos
+                # Obtener datos del producto
                 self.db.cursor.execute('''
-                SELECT cantidad_por_caja FROM productos WHERE codigo = ?
+                SELECT cantidad_por_caja, prioridad FROM productos WHERE codigo = ?
                 ''', (codigo,))
                 resultado = self.db.cursor.fetchone()
+                
                 if not resultado:
-                    continue  # Si el producto no está en la tabla productos, saltar
-                cantidad_por_caja = resultado[0]
+                    continue  # Si no existe en productos, saltar
+                    
+                cantidad_por_caja, prioridad = resultado
+                prioridad = prioridad.lower() if prioridad else 'baja'
 
-                # Obtener las ventas históricas del producto
+                # Obtener ventas históricas
                 self.db.cursor.execute('''
-                SELECT fecha_carga, SUM(cantidad) as total_cantidad
-                FROM ventas
-                WHERE codigo = ?
+                SELECT SUM(cantidad) FROM ventas WHERE codigo = ?
                 GROUP BY fecha_carga
-                ORDER BY fecha_carga
                 ''', (codigo,))
-                ventas_producto = self.db.cursor.fetchall()
-
-                if not ventas_producto:
+                ventas = [v[0] for v in self.db.cursor.fetchall()]
+                
+                if not ventas:
                     continue
 
-                # Calcular la demanda promedio diaria
-                fechas = [venta[0] for venta in ventas_producto]
-                cantidades = [venta[1] for venta in ventas_producto]
-                demanda_promedio_diaria = sum(cantidades) / len(cantidades)
+                # Cálculos principales
+                demanda_diaria = sum(ventas) / len(ventas)
+                punto_reorden = demanda_diaria * TIEMPO_ENTREGA
+                eoq = sqrt((2 * demanda_diaria * 365 * COSTO_PEDIDO) / COSTO_ALMACENAMIENTO)
+                
+                # Aplicar buffer según prioridad
+                buffer = BUFFER_PRIORIDAD.get(prioridad, 1.0)
+                punto_efectivo = punto_reorden * buffer
 
-                # Calcular el punto de reorden
-                punto_reorden = demanda_promedio_diaria * tiempo_entrega
+                # Calcular cajas a pedir
+                cajas_a_pedir = 0
+                if inventario_actual < punto_efectivo:
+                    if inventario_actual < punto_reorden:
+                        cantidad_necesaria = (punto_reorden - inventario_actual) + eoq
+                    else:
+                        cantidad_necesaria = eoq
+                    
+                    cajas_a_pedir = max(0, ceil(cantidad_necesaria / cantidad_por_caja) - 1)
 
-                # Calcular la cantidad económica de pedido (EOQ)
-                demanda_anual = demanda_promedio_diaria * 365  # Suponiendo 365 días al año
-                eoq = sqrt((2 * demanda_anual * costo_pedido) / costo_almacenamiento)
-
-                # Calcular el número de cajas a pedir (solo si el inventario es menor que el punto de reorden)
-                if inventario_actual < punto_reorden:
-                    cajas_a_pedir = (ceil((punto_reorden - inventario_actual + eoq) / cantidad_por_caja)-1)
-                else:
-                    cajas_a_pedir = 0
-
-                # Insertar los resultados en la tabla
+                # Insertar en tabla
                 tabla_recomendaciones.insert("", "end", values=(
                     nombre,
                     inventario_actual,
-                    round(demanda_promedio_diaria, 2),
+                    round(demanda_diaria, 2),
                     round(punto_reorden, 2),
                     round(eoq, 2),
                     cajas_a_pedir
                 ))
 
-            btn_frame = tk.Frame(ventana_recomendaciones)
-            btn_frame.pack(pady=10)
-
+            # Botón de exportación
             btn_exportar = tk.Button(
-                btn_frame,
-                text="Generar Orden desde Plantilla",
-                command=lambda: self.generar_orden_desde_plantilla(tabla_recomendaciones)
+                ventana_recomendaciones,
+                text="Generar Orden Automática",
+                command=lambda: self.generar_orden_desde_plantilla(tabla_recomendaciones),
+                bg="#4CAF50",
+                fg="white"
             )
-            btn_exportar.pack(side=tk.LEFT, padx=5)
+            btn_exportar.pack(pady=10)
 
         except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error al cargar el inventario o calcular los pedidos: {e}")
+            messagebox.showerror("Error", f"Error al procesar inventario: {str(e)}")
 
     def generar_orden_desde_plantilla(self, tabla_recomendaciones):
         try:
@@ -645,3 +652,117 @@ class AppVentas:
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al generar orden:\n{str(e)}")
+
+    def gestionar_prioridades(self):
+        try:
+            # Crear ventana
+            ventana_prioridades = tk.Toplevel(self.root)
+            ventana_prioridades.title("Gestión de Prioridades")
+            ventana_prioridades.geometry("800x600")
+            
+            # Frame para controles
+            frame_controles = tk.Frame(ventana_prioridades)
+            frame_controles.pack(pady=10)
+            
+            # Buscador
+            tk.Label(frame_controles, text="Buscar:").pack(side=tk.LEFT)
+            self.entry_buscar_prioridad = tk.Entry(frame_controles, width=30)
+            self.entry_buscar_prioridad.pack(side=tk.LEFT, padx=5)
+            btn_buscar = tk.Button(frame_controles, text="Buscar", command=self.actualizar_lista_prioridades)
+            btn_buscar.pack(side=tk.LEFT)
+            
+            # Tabla de productos
+            columnas = ("Código", "Nombre", "Prioridad")
+            self.tabla_prioridades = ttk.Treeview(
+                ventana_prioridades, 
+                columns=columnas, 
+                show="headings",
+                selectmode="browse"
+            )
+            
+            for col in columnas:
+                self.tabla_prioridades.heading(col, text=col)
+                self.tabla_prioridades.column(col, width=100, anchor="center")
+            
+            self.tabla_prioridades.pack(fill="both", expand=True, padx=10, pady=5)
+            
+            # Frame para cambiar prioridad
+            frame_cambiar = tk.Frame(ventana_prioridades)
+            frame_cambiar.pack(pady=10)
+            
+            tk.Label(frame_cambiar, text="Cambiar prioridad a:").pack(side=tk.LEFT)
+            
+            self.opcion_prioridad = tk.StringVar(value="baja")
+            tk.Radiobutton(frame_cambiar, text="Baja", variable=self.opcion_prioridad, value="baja").pack(side=tk.LEFT, padx=5)
+            tk.Radiobutton(frame_cambiar, text="Media", variable=self.opcion_prioridad, value="media").pack(side=tk.LEFT, padx=5)
+            tk.Radiobutton(frame_cambiar, text="Alta", variable=self.opcion_prioridad, value="alta").pack(side=tk.LEFT, padx=5)
+            
+            btn_actualizar = tk.Button(
+                frame_cambiar, 
+                text="Aplicar Cambio", 
+                command=self.actualizar_prioridad,
+                bg="#4CAF50",
+                fg="white"
+            )
+            btn_actualizar.pack(side=tk.LEFT, padx=10)
+            
+            # Cargar datos iniciales
+            self.actualizar_lista_prioridades()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la interfaz: {str(e)}")
+
+    def actualizar_lista_prioridades(self):
+        try:
+            # Limpiar tabla
+            for item in self.tabla_prioridades.get_children():
+                self.tabla_prioridades.delete(item)
+                
+            # Obtener término de búsqueda
+            busqueda = self.entry_buscar_prioridad.get().strip()
+            
+            # Consultar productos
+            query = '''
+            SELECT codigo, nombre, prioridad 
+            FROM productos
+            WHERE codigo LIKE ? OR nombre LIKE ?
+            ORDER BY codigo
+            '''
+            params = (f"%{busqueda}%", f"%{busqueda}%")
+            
+            productos = self.db.ejecutar_consulta(query, params)
+            
+            # Llenar tabla
+            for prod in productos:
+                self.tabla_prioridades.insert("", "end", values=prod)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudieron cargar los productos: {str(e)}")
+
+    def actualizar_prioridad(self):
+        try:
+            # Obtener producto seleccionado
+            seleccion = self.tabla_prioridades.selection()
+            if not seleccion:
+                messagebox.showwarning("Advertencia", "Selecciona un producto primero")
+                return
+                
+            # Obtener datos
+            item = self.tabla_prioridades.item(seleccion[0])
+            codigo = item['values'][0]
+            nueva_prioridad = self.opcion_prioridad.get()
+            
+            # Actualizar en BD
+            self.db.cursor.execute('''
+            UPDATE productos 
+            SET prioridad = ?
+            WHERE codigo = ?
+            ''', (nueva_prioridad, codigo))
+            self.db.conn.commit()
+            
+            # Actualizar lista
+            self.actualizar_lista_prioridades()
+            messagebox.showinfo("Éxito", f"Prioridad actualizada para {item['values'][1]}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo actualizar: {str(e)}")
